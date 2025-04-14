@@ -1,56 +1,42 @@
 import json
 import sys
 import os
+import re #正規表現モジュールをインポート
 from dotenv import load_dotenv
 from openai import OpenAI
 from pathlib import Path
 
-def main():
-    # .envファイルから環境変数を読み込む
-    load_dotenv(override=True)
-    
-    # コマンドライン引数を取得
-    args = sys.argv[1:]  # 最初の引数(スクリプト名)を除く
-    
-    # 最初の引数をファイル名として使用
-    filename = args[0] if args else 'wiki.json'
+def load_json_file(input_filename):
+    with open(input_filename, 'r', encoding='utf-8') as f:
+        try:
+            # JSONファイルがオブジェクトのリストであることを期待
+            data_list = json.load(f)
+            if not isinstance(data_list, list) or not data_list:
+                 print(f"エラー: '{input_filename}' は空か、JSONオブジェクトのリストではありません。リストの最初の要素のみ使用します。")
+                 # もしリストでない単一オブジェクトならリストに入れる
+                 if isinstance(data_list, dict):
+                     data = data_list
+                 else:
+                     return # リストでも辞書でもなければ終了
+            else:
+                data = data_list
+        except json.JSONDecodeError:
+            print(f"エラー: ファイル '{input_filename}' は有効なJSONではありません。")
+            return
+        except Exception as e:
+            print(f"エラー: ファイル '{input_filename}' の読み込み中にエラーが発生しました: {e}")
+            return
+        return data
 
-    # ファイルのパスを確認
-    file_path = Path(filename)
-    if not file_path.exists():
-        print(f"エラー: ファイル '{filename}' が見つかりません。")
-        return
 
-    with open(file_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-    
-    # OpenAI APIキーの設定
+def generate_queries(knowledge_text):
     api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        print("エラー: OPENAI_API_KEYが設定されていません。.envファイルを確認してください。")
-        return
-    
     base_url = os.environ.get("OPENAI_BASE_URL")
-    if not base_url:
-        print("エラー: OPENAI_BASE_URLが設定されていません。OpenAIの公式apiに接続します。")
-        base_url = "https://api.openai.com/v1"
-    
+    use_model = os.environ.get("OPENAI_USE_MODEL")
+
     client = OpenAI(base_url=base_url, api_key=api_key)
 
-    use_model = os.environ.get("OPENAI_USE_MODEL")
-    if not use_model:
-        print("エラー: OPENAI_USE_MODELが設定されていません。.envファイルを確認してください。")
-        return
-    
-    # データからtextフィールドを抽出
-    if "text" not in data[0]:
-        print("エラー: 指定されたJSONファイルにtextフィールドがありません")
-        return
-    
-    knowledge_text = data[0]["text"]
-    
-    # ユーザーに質問を入力してもらう
-    user_query = f"""AIアシスタントに対してユーザーが依頼するであろうクエリをいくつか作成してください。
+    user_query_prompt = f"""AIアシスタントに対してユーザーが依頼するであろうクエリをいくつか作成してください。
 AIアシスタントは<knowledge>タグ内の文章を知識として備えており、ユーザーはAIアシスタントに対して質問や依頼を行います。
 
 <knowledge>
@@ -69,17 +55,68 @@ AIアシスタントは<knowledge>タグ内の文章を知識として備えて�
 - クエリには、「この作品」や「この人」といった主語をぼかす表現を使うことは禁止します。
 """
     
-    # OpenAI APIを使用して回答を生成
-    response = client.chat.completions.create(
-        model=use_model,
-        messages=[
-            {"role": "user", "content": user_query}
-        ]
-    )
+    try:
+        response = client.chat.completions.create(
+            model=use_model,
+            messages=[
+                {"role": "user", "content": user_query_prompt}
+            ]
+        )
+        generated_text = response.choices[0].message.content
+    except Exception as e:
+        print(f"エラー: OpenAI API呼び出し中にエラーが発生しました: {e}")
+        return
     
-    # 応答を表示
-    print("\n回答:")
-    print(response.choices[0].message.content)
+    queries = re.findall(r'<query>(.*?)</query>', generated_text, re.DOTALL)
+
+    return queries, user_query_prompt, generated_text
+    
+
+def main():
+    # .envファイルから環境変数を読み込む
+    load_dotenv(override=True)
+    
+    # コマンドライン引数を取得
+    args = sys.argv[1:]  # 最初の引数(スクリプト名)を除く
+    
+    # 最初の引数をファイル名として使用
+    input_filename = args[0] if args else 'wiki.json'
+    # 2番目の引数を出力ファイル名として使用（なければデフォルト）
+    output_filename = args[1] if len(args) > 1 else 'generated_queries.json'
+
+    # 入力ファイルのパスを確認
+    input_file_path = Path(input_filename)
+    if not input_file_path.exists():
+        print(f"エラー: ファイル '{input_filename}' が見つかりません。")
+        return
+
+    data = load_json_file(input_file_path)
+
+    queries, user_query_prompt, generated_text = generate_queries(data[0]["text"])
+
+    # 結果を格納するリスト
+    results = []
+
+    # 抽出したクエリごとにJSONオブジェクトを作成
+    for query in queries:
+        result_item = {
+            "title": data[0].get("title"),
+            "text": data[0].get("text"),
+            "source": data[0].get("source"),
+            "prompt": user_query_prompt,
+            "generated_text": generated_text, # LLMが生成したテキスト全体
+            "query": query.strip() # 前後の空白を削除
+        }
+        results.append(result_item)
+
+    # 結果をJSONファイルに保存
+    output_file_path = Path(output_filename)
+    try:
+        with open(output_file_path, 'w', encoding='utf-8') as f:
+            json.dump(results, f, ensure_ascii=False, indent=2)
+        print(f"生成されたクエリを '{output_filename}' に保存しました。")
+    except Exception as e:
+        print(f"エラー: ファイル '{output_filename}' への書き込み中にエラーが発生しました: {e}")
 
 if __name__ == "__main__":
     main()
