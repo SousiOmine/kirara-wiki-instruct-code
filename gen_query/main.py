@@ -2,6 +2,7 @@ import json
 import sys
 import os
 import re #正規表現モジュールをインポート
+import uuid
 from dotenv import load_dotenv
 from openai import OpenAI
 from pathlib import Path
@@ -44,7 +45,7 @@ AIアシスタントは<knowledge>タグ内の文章を知識として備えて�
 </knowledge>
 
 # 作成してほしいクエリ
-<knowledge>タグ内の知識について質問するクエリを5個ほど作成してください。このクエリには作品名を含めてください。（ただし作品名はかっこで囲ったりはしないこと）
+<knowledge>タグ内の知識について質問するクエリを5個ほど作成してください。このクエリには作品名を含めてください。（ただし作品名はかっこで囲んだりはしないこと）
 次に、<knowledge>タグ内の情報が答えとなるクエリを5個ほど作成してください。このクエリには作品名を含めません。
 さらに、knowledge内の知識だけでは答えられないようなクエリも2個ほど混ぜてください。
 
@@ -83,6 +84,8 @@ def main():
     input_filename = args[0] if args else 'wiki.json'
     # 2番目の引数を出力ファイル名として使用（なければデフォルト）
     output_filename = args[1] if len(args) > 1 else 'generated_queries.json'
+    # 3番目の引数を出力ファイル名として使用（なければデフォルト）
+    text_and_prompt_filename = args[2] if len(args) > 2 else 'text_and_prompt.json'
 
     # 入力ファイルのパスを確認
     input_file_path = Path(input_filename)
@@ -95,28 +98,29 @@ def main():
     queries, user_query_prompt, generated_text = generate_queries(data[0]["text"])
 
     # 結果を格納するリスト
-    results = []
+    text_and_prompt = {
+        "text": data[0]["text"],
+        "user_query_prompt": user_query_prompt,
+        "generated_text": generated_text,
+    }
 
-    # 抽出したクエリごとにJSONオブジェクトを作成
+    # クエリごとに個別のオブジェクトを作成
+    queries_results = []
     for query in queries:
-        result_item = {
-            "title": data[0].get("title"),
-            "text": data[0].get("text"),
-            "source": data[0].get("source"),
-            "prompt": user_query_prompt,
-            "generated_text": generated_text, # LLMが生成したテキスト全体
-            "query": query.strip() # 前後の空白を削除
-        }
-        results.append(result_item)
+        queries_results.append({
+            "id": str(uuid.uuid4()),
+            "text": data[0]["text"],
+            "query": query
+        })
 
-    # 結果をJSONファイルに保存
-    output_file_path = Path(output_filename)
-    try:
-        with open(output_file_path, 'w', encoding='utf-8') as f:
-            json.dump(results, f, ensure_ascii=False, indent=2)
-        print(f"生成されたクエリを '{output_filename}' に保存しました。")
-    except Exception as e:
-        print(f"エラー: ファイル '{output_filename}' への書き込み中にエラーが発生しました: {e}")
+    # 2つのJSONファイルに保存
+    with open(text_and_prompt_filename, 'w', encoding='utf-8') as f:
+        json.dump(text_and_prompt, f, ensure_ascii=False, indent=2)
+    with open(output_filename, 'w', encoding='utf-8') as f:
+        json.dump(queries_results, f, ensure_ascii=False, indent=2)
+
+    print(f"生成されたクエリを '{output_filename}' に保存しました。")
+    print(f"生成されたtext_and_promptを '{text_and_prompt_filename}' に保存しました。")
 
 if __name__ == "__main__":
     main()

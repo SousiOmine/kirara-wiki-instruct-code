@@ -172,4 +172,7 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+
 gen_query/generated_queries.json
+gen_query/text_and_prompt.json
