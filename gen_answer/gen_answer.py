@@ -4,6 +4,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 from openai import OpenAI
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import argparse
+import random
 
 CACHE_DIR = Path("cache")
 
@@ -15,21 +17,26 @@ def process_single_query(query_data, client, use_model):
     """単一クエリを処理"""
     query = query_data["query"]
     knowledge = query_data["text"]
-    
-    prompt = f"""以下の知識に基づいて質問に答えてください。
+
+    system_prompt = f"""あなたは親切なAIアシスタントです。一般常識のほかに、以下の知識を考慮して、質問に答えてください。
 
 <knowledge>
 {knowledge}
 </knowledge>
 
-質問: {query}
+# 注意点
+- あなたはインターネットにアクセスできないため、最新の状況を取得することはできません。
+- たまにあなたの知らないことを聞かれることがあります。知らない場合は知らないということを述べ、そのうえで回答を行ってください。
+    """
+    
+    prompt = f"""{query}
 """
     
     try:
         response = client.chat.completions.create(
             model=use_model,
             messages=[
-                {"role": "system", "content": "あなたは知識に基づいて質問に答えるAIアシスタントです。"},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
             ]
         )
@@ -50,7 +57,7 @@ def generate_answers(queries):
     load_dotenv(override=True)
     api_key = os.environ.get("OPENAI_API_KEY")
     base_url = os.environ.get("OPENAI_BASE_URL")
-    use_model = os.environ.get("OPENAI_USE_MODEL", "gpt-3.5-turbo")
+    use_model = os.environ.get("OPENAI_USE_MODEL", "gpt-4o-mini")
 
     client = OpenAI(base_url=base_url, api_key=api_key)
     
@@ -65,14 +72,15 @@ def generate_answers(queries):
         cache_file = CACHE_DIR / f"{query_data['id']}.jsonl"
         
         if cache_file.exists():
+            print(f"キャッシュから読み込み中: {query_data['id']}")
             with open(cache_file, 'r', encoding='utf-8') as f:
                 for line in f:
                     results.append(json.loads(line))
         else:
             pending_queries.append(query_data)
     
-    # 並列処理 (5並列)
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    # 並列処理 (20並列)
+    with ThreadPoolExecutor(max_workers=20) as executor:
         futures = [
             executor.submit(process_single_query, query_data, client, use_model)
             for query_data in pending_queries
@@ -91,10 +99,23 @@ def generate_answers(queries):
     return results
 
 def main():
-    input_file = "../gen_query/generated_queries.json"
+    import argparse
+    import random
+    
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--input', type=str, default="../gen_query/generated_queries.json", 
+                       help='入力JSONファイルのパス')
+    parser.add_argument('--test', action='store_true', help='テストモード: ランダムに10個のクエリだけ処理')
+    args = parser.parse_args()
+    
     output_file = "generated_answers.jsonl"
     
-    queries = load_queries(input_file)
+    queries = load_queries(args.input)
+    
+    if args.test:
+        queries = random.sample(queries, min(10, len(queries)))
+        print(f"テストモード: {len(queries)}個のクエリを処理します")
+    
     answers = generate_answers(queries)
     
     with open(output_file, 'w', encoding='utf-8') as f:

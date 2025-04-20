@@ -9,6 +9,7 @@ from openai import OpenAI
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
+from datasets import load_dataset
 
 # キャッシュディレクトリの設定
 CACHE_DIR = Path("cache")
@@ -48,21 +49,23 @@ def generate_queries(knowledge_text, cache_id=None):
 
     client = OpenAI(base_url=base_url, api_key=api_key)
 
-    user_query_prompt = f"""AIアシスタントに対してユーザーが依頼するであろうクエリをいくつか作成してください。
+    user_query_prompt = f"""AIアシスタントに対してユーザーが依頼するであろうクエリを10個ほど作成してください。
 <knowledge>
 {knowledge_text}
 </knowledge>
 
 # 作成してほしいクエリ
-<knowledge>タグ内の知識について質問するクエリを5個ほど作成してください。このクエリには作品名を含めてください。（ただし作品名はかっこで囲んだりはしないこと）
-次も<knowledge>タグ内の知識について質問するクエリを5つ作成してもらいますが、こちらのクエリでは条件付けや出力形式の指定やその他による、複雑で高度なクエリを作成するようにしてください。
-さらに、knowledge内の知識だけでは答えられないようなクエリも2個ほど混ぜてください。
+以下に例としてクエリを3つ提示するので、これを参考にしてください
+<example_queries>
+{random.sample(load_example_instruction_dataset(), 3)}
+</example_queries>
 
 これらクエリはひとつひとつを<query>タグで囲んでください。
 <query>タグ内にはユーザーからのクエリのみを記載し、それ以外の内容を記載しないでください。
 
 # 制約
 - クエリには、「この作品」や「この人」といった主語をぼかす表現を使うことは禁止します。
+- 作品名や人名をクエリ内で用いる場合は、かぎかっこで囲わずに記載してください。
 """
     
     try:
@@ -94,6 +97,16 @@ def generate_queries(knowledge_text, cache_id=None):
 
 def process_item(item, cache_id):
     return generate_queries(item["text"], cache_id)
+
+def load_example_instruction_dataset(dataset_name="Kendamarron/jimba-instuction-1k-beta"):
+    """Hugging Faceのデータセットからinstructionを読み込む"""
+    try:
+        dataset = load_dataset(dataset_name)
+        instructions = [item["instruction"] for item in dataset["train"]]
+        return instructions
+    except Exception as e:
+        print(f"エラー: データセットの読み込み中にエラーが発生しました: {e}")
+        return []
 
 def main():
     load_dotenv(override=True)
