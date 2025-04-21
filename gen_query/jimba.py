@@ -65,7 +65,7 @@ def generate_queries(knowledge_text, cache_id=None):
 
 # 制約
 - クエリには、「この作品」や「この人」といった主語をぼかす表現を使うことは禁止します。
-- 作品名や人名をクエリ内で用いる場合は、かぎかっこで囲わずに記載してください。
+- 作品名や人名、作中の固有名詞のいずれかは必ずクエリ内で用いてください。また、作品名や人名はかぎかっこで囲わずに記載してください。
 """
     
     try:
@@ -141,8 +141,12 @@ def main():
     start_time = time.time()
     processed_items = []
     skipped_items = 0
+
+    max_workers = 5
+    if(single_mode):
+        max_workers = 1
     
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = []
         for item in data:
             cache_id = str(uuid.uuid5(uuid.NAMESPACE_URL, item["text"]))

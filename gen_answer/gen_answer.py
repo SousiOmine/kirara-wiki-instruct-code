@@ -66,6 +66,10 @@ def generate_answers(queries):
     
     results = []
     
+    # 進捗表示用カウンタ
+    progress_counter = 0
+    total_queries = len(queries)
+    
     # スキップ済みクエリと未処理クエリを分離
     pending_queries = []
     for query_data in queries:
@@ -87,6 +91,8 @@ def generate_answers(queries):
         ]
         
         for future in as_completed(futures):
+            progress_counter += 1
+            print(f"処理中: {progress_counter}/{total_queries} ({progress_counter/total_queries*100:.1f}%)")
             result = future.result()
             if result:
                 # 結果をキャッシュに保存
